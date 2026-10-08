@@ -253,15 +253,19 @@
             <button class="mode-btn" data-mode="live" id="modeLiveBtn">Live</button>
           </div>
           <div id="livePanel" style="display:none">
-            <div class="row"><label>WS URL</label></div>
-            <div class="row"><input type="text" id="wsUrl" value="ws://127.0.0.1:8765" class="conn-input"></div>
-            <div class="row"><label>API Key</label></div>
-            <div class="row"><input type="password" id="apiKey" placeholder="Any key (auth is on server)" class="conn-input"></div>
-            <div class="row"><input type="text" id="secId" placeholder="Dhan Security ID (e.g. 13 for NIFTY)" class="conn-input"></div>
-            <div class="row"><input type="text" id="exSeg" value="IDX_I" placeholder="Exchange Segment (IDX_I / NSE_FNO / MCX_COMM)" class="conn-input"></div>
-            <div class="row" style="font-size:11px;color:var(--muted);padding:4px 0">
-              Presets: NIFTY → secId=13, seg=IDX_I &nbsp;|&nbsp;
-              Look up IDs: <a href="https://images.dhan.co/api-data/api-scrip-master-detailed.csv" target="_blank" style="color:var(--accent)">scrip master</a>
+            <div class="row" style="font-size:11px;color:#3aa0ff;padding:2px 0">📱 Phone: enter Dhan Client ID + Token (no PC)</div>
+            <div class="row"><label>Dhan Client ID</label></div>
+            <div class="row"><input type="text" id="dhanClientId" placeholder="your client id" class="conn-input"></div>
+            <div class="row"><label>Dhan Access Token</label></div>
+            <div class="row"><input type="password" id="dhanToken" placeholder="access token" class="conn-input"></div>
+            <div class="row"><label>Security ID</label></div>
+            <div class="row"><input type="text" id="secId" value="13" placeholder="13=NIFTY 25=BANKNIFTY" class="conn-input"></div>
+            <div class="row"><label>Segment</label></div>
+            <div class="row"><input type="text" id="exSeg" value="IDX_I" placeholder="IDX_I / NSE_FNO / NSE_EQ / MCX_COMM" class="conn-input"></div>
+            <div class="row"><label>PC proxy (optional)</label></div>
+            <div class="row"><input type="text" id="wsUrl" value="" placeholder="leave empty on phone" class="conn-input"></div>
+            <div class="row" style="font-size:10px;color:var(--muted);padding:2px 0">
+              <a href="https://images.dhan.co/api-data/api-scrip-master-detailed.csv" target="_blank" style="color:var(--accent)">Scrip master (Security IDs)</a>
             </div>
             <div class="row">
               <label>Symbol</label>
@@ -1035,13 +1039,28 @@ function clearAllData(){
 }
 
 function connectLive(){
-  const url = document.getElementById('wsUrl').value.trim();
-  const apiKey = document.getElementById('apiKey').value.trim();
+  // === Mobile-only: use native Dhan bridge (no PC) ===
+  if (window.__DHAN_NATIVE__ && window.DhanNative) {
+    const cid = (document.getElementById('dhanClientId')||{}).value || '';
+    const tok = (document.getElementById('dhanToken')||{}).value || '';
+    const sec = (document.getElementById('secId')||{}).value || '13';
+    const seg = (document.getElementById('exSeg')||{}).value || 'IDX_I';
+    if (!cid || !tok) { connLog('Enter Dhan Client ID + Access Token','err'); return; }
+    try {
+      disconnectLive();
+      DhanNative.start(cid, tok, seg, sec, 1000);
+      document.getElementById('status').textContent = 'Live · Mobile Dhan · ' + seg + ':' + sec;
+      connLog('Started mobile Dhan feed (no PC)','ok');
+      return;
+    } catch (e) { connLog('Native start failed: '+e,'err'); }
+  }
+  const url = (document.getElementById('wsUrl')||{}).value || '';
+  const apiKey = (document.getElementById('dhanToken')||document.getElementById('apiKey')||{}).value || 'mobile';
   const symbol = document.getElementById('wsSymbol').value.trim().toUpperCase();
   const exchange = document.getElementById('wsExchange').value;
 
   if(!url){ connLog('URL required','err'); return; }
-  if(!apiKey){ connLog('API key required','err'); return; }
+  if(!url && !(window.__DHAN_NATIVE__&&window.DhanNative)){ connLog('Use Mobile fields (Client ID + Token) or set ws URL','err'); return; }
   if(!symbol){ connLog('Symbol required','err'); return; }
 
   // Update tick size from user input
@@ -1155,6 +1174,8 @@ function connectLive(){
 }
 
 function disconnectLive(){
+  try{ if(window.DhanNative) DhanNative.stop(); }catch(e){}
+
   if(liveWs){
     try { liveWs.close(); } catch(e){}
     liveWs = null;
