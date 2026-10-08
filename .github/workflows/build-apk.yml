@@ -19,33 +19,28 @@ jobs:
         with:
           java-version: "17"
           distribution: "temurin"
-          cache: gradle
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Accept Android licenses
-        run: yes | sdkmanager --licenses || true
+        with:
+          packages: 'tools platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Create local.properties
         working-directory: android
-        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-
-      - name: Install Gradle 8.2
         run: |
-          curl -sL https://services.gradle.org/distributions/gradle-8.2-bin.zip -o /tmp/gradle-8.2-bin.zip
-          unzip -q /tmp/gradle-8.2-bin.zip -d /tmp
-          echo "/tmp/gradle-8.2/bin" >> $GITHUB_PATH
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "SDK: $ANDROID_HOME"
+          ls "$ANDROID_HOME" || true
 
-      - name: Generate Gradle Wrapper
-        working-directory: android
-        run: |
-          gradle wrapper --gradle-version 8.2
-          chmod +x gradlew
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.2"
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        run: |
+          gradle assembleDebug --stacktrace --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -56,7 +51,8 @@ jobs:
           if-no-files-found: error
 
       - name: Summary
+        if: success()
         run: |
           ls -lh android/app/build/outputs/apk/debug/
-          echo "### APK ready" >> $GITHUB_STEP_SUMMARY
-          echo "Download the artifact **DhanOrderFlowMap-APK** from this run." >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ APK built successfully" >> $GITHUB_STEP_SUMMARY
+          echo "Download artifact **DhanOrderFlowMap-APK** from this workflow run." >> $GITHUB_STEP_SUMMARY
