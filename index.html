@@ -210,6 +210,43 @@
   ::-webkit-scrollbar-thumb{background:#263246;border-radius:3px}
   ::-webkit-scrollbar-thumb:hover{background:#34465f}
   ::-webkit-scrollbar-track{background:transparent}
+
+  /* ===== MOBILE / SMALL SCREEN ===== */
+  .opt-advanced{display:block}
+  @media (max-width:900px){
+    .layout{grid-template-columns:1fr !important; grid-template-rows:auto 1fr auto !important}
+    .side.left{max-height:42vh; overflow-y:auto; border-right:none; border-bottom:1px solid var(--border)}
+    .side.right{display:none !important} /* hide DOM ladder on small screens by default */
+    .hdr-stats span{display:none}
+    .hdr-stats span:nth-child(-n+3){display:inline}
+    .group.opt-advanced{display:none !important}
+    #btnShowAdvanced{display:block !important}
+    .legend{font-size:10px; max-width:50%}
+    .footer{font-size:10px}
+  }
+  @media (max-width:600px){
+    .side.left{max-height:38vh}
+    header{padding:4px 8px; flex-wrap:wrap}
+    .hdr-title{font-size:13px}
+  }
+  #btnShowAdvanced{display:none; width:100%; margin:6px 0; padding:8px; background:#1a2332; border:1px solid #2a3a50; color:var(--text); border-radius:6px; cursor:pointer}
+  .sym-search-wrap{position:relative}
+  .sym-results{
+    position:absolute; left:0; right:0; top:100%; z-index:50;
+    max-height:220px; overflow-y:auto; background:#0e131b; border:1px solid #2a3a50;
+    border-radius:6px; display:none;
+  }
+  .sym-results.open{display:block}
+  .sym-item{
+    padding:8px 10px; border-bottom:1px solid #1a2332; cursor:pointer; font-size:12px;
+  }
+  .sym-item:hover,.sym-item.active{background:#1a2a40}
+  .sym-item .tag{font-size:10px; color:#7a8597; margin-left:6px}
+  .sym-item .exp{color:#3aa0ff; font-size:10px}
+  .chip-row{display:flex; flex-wrap:wrap; gap:4px; margin:4px 0}
+  .chip{padding:4px 8px; background:#1a2332; border:1px solid #2a3a50; border-radius:12px; font-size:11px; cursor:pointer; color:var(--text)}
+  .chip:hover,.chip.on{background:#1a3a5c; border-color:var(--accent)}
+
 </style>
 </head>
 <body>
@@ -254,6 +291,14 @@
           </div>
           <div id="livePanel" style="display:none">
             <div class="row" style="font-size:11px;color:#3aa0ff;padding:2px 0">📱 Phone: enter Dhan Client ID + Token (no PC)</div>
+            <div class="row"><label>Search symbol</label></div>
+            <div class="row sym-search-wrap">
+              <input type="text" id="symSearch" placeholder="Search NIFTY, RELIANCE, CRUDEOIL..." class="conn-input" autocomplete="off">
+              <div class="sym-results" id="symResults"></div>
+            </div>
+            <div class="chip-row" id="symChips"></div>
+            <div id="optExpiryRow" style="display:none"></div>
+
             <div class="row"><label>Dhan Client ID</label></div>
             <div class="row"><input type="text" id="dhanClientId" placeholder="your client id" class="conn-input"></div>
             <div class="row"><label>Dhan Access Token</label></div>
@@ -1717,6 +1762,190 @@ restartLoop();
 
 chart.timeScale().subscribeVisibleLogicalRangeChange(()=>heatmap.requestUpdate());
 window.addEventListener('resize',()=>heatmap.requestUpdate());
+
+
+/* ===== INSTRUMENT SEARCH (spot / equity / F&O by expiry / MCX) ===== */
+let INSTRUMENTS = {spot:[], equity:[], futures:[], mcx:[], option_underlyings:[]};
+let SYM_FILTER = 'ALL'; // ALL | SPOT | EQ | FUT | MCX | OPT
+
+async function loadInstruments(){
+  try{
+    const urls = ['instruments.json', './instruments.json', 'file:///android_asset/instruments.json'];
+    let data = null;
+    for(const u of urls){
+      try{
+        const r = await fetch(u);
+        if(r.ok){ data = await r.json(); break; }
+      }catch(e){}
+    }
+    if(!data){ console.warn('instruments.json not loaded'); return; }
+    INSTRUMENTS = data;
+    renderQuickChips();
+    connLog('Symbols loaded · '+(flatSymbols().length)+' instruments','ok');
+  }catch(e){ console.error(e); }
+}
+
+function flatSymbols(){
+  const out = [];
+  (INSTRUMENTS.spot||[]).forEach(x => out.push({...x, cat:'SPOT'}));
+  (INSTRUMENTS.equity||[]).forEach(x => out.push({...x, cat:'EQ'}));
+  (INSTRUMENTS.futures||[]).forEach(x => out.push({...x, cat:'FUT'}));
+  (INSTRUMENTS.mcx||[]).forEach(x => out.push({...x, cat:'MCX'}));
+  return out;
+}
+
+function renderQuickChips(){
+  const row = document.getElementById('symChips');
+  if(!row) return;
+  const chips = [
+    {k:'ALL',l:'All'},{k:'SPOT',l:'Index'},{k:'EQ',l:'Stocks'},
+    {k:'FUT',l:'F&O Fut'},{k:'MCX',l:'MCX'},{k:'OPT',l:'Options'}
+  ];
+  row.innerHTML = chips.map(c =>
+    `<span class="chip ${SYM_FILTER===c.k?'on':''}" data-f="${c.k}">${c.l}</span>`
+  ).join('');
+  row.querySelectorAll('.chip').forEach(ch => {
+    ch.onclick = () => { SYM_FILTER = ch.dataset.f; renderQuickChips(); onSymSearch(); };
+  });
+}
+
+function onSymSearch(){
+  const q = (document.getElementById('symSearch')?.value || '').trim().toUpperCase();
+  const box = document.getElementById('symResults');
+  if(!box) return;
+  let list = flatSymbols();
+  if(SYM_FILTER === 'SPOT') list = list.filter(x => x.cat==='SPOT');
+  else if(SYM_FILTER === 'EQ') list = list.filter(x => x.cat==='EQ');
+  else if(SYM_FILTER === 'FUT') list = list.filter(x => x.cat==='FUT');
+  else if(SYM_FILTER === 'MCX') list = list.filter(x => x.cat==='MCX');
+  else if(SYM_FILTER === 'OPT'){
+    // show option underlyings as selectable roots
+    list = (INSTRUMENTS.option_underlyings||[]).map(u => ({
+      id: '', seg: u.seg, sym: u.root, name: u.root + ' OPTIONS',
+      tick: 0.05, cat: 'OPT', expiries: u.expiries
+    }));
+  }
+  if(q){
+    list = list.filter(x =>
+      (x.sym||'').toUpperCase().includes(q) ||
+      (x.name||'').toUpperCase().includes(q) ||
+      (x.id||'').includes(q)
+    );
+  }
+  // FUT/MCX: sort by expiry ascending (nearest first)
+  if(SYM_FILTER==='FUT' || SYM_FILTER==='MCX' || (!q && SYM_FILTER==='ALL')){
+    list = list.slice().sort((a,b) => {
+      if(a.cat!==b.cat) return 0;
+      return (a.exp||'9999').localeCompare(b.exp||'9999');
+    });
+  }
+  list = list.slice(0, 60);
+  if(!list.length){
+    box.innerHTML = '<div class="sym-item">No match</div>';
+    box.classList.add('open');
+    return;
+  }
+  box.innerHTML = list.map((x,i) => {
+    const exp = x.exp ? `<span class="exp">${x.exp}</span>` : (x.expiries ? `<span class="exp">${x.expiries[0]||''}</span>` : '');
+    return `<div class="sym-item" data-i="${i}" data-id="${x.id||''}" data-seg="${x.seg||''}" data-sym="${x.sym||''}" data-tick="${x.tick||0.05}" data-cat="${x.cat||''}" data-expiries="${(x.expiries||[]).join(',')}">
+      <b>${x.sym||x.name}</b> <span class="tag">${x.cat||''} · ${x.seg||''}</span> ${exp}<br>
+      <span class="tag">${x.name||''} ${x.id?('ID '+x.id):''}</span>
+    </div>`;
+  }).join('');
+  box.classList.add('open');
+  box.querySelectorAll('.sym-item').forEach(el => {
+    el.onclick = () => selectSymbol(el);
+  });
+}
+
+function selectSymbol(el){
+  const id = el.dataset.id;
+  const seg = el.dataset.seg;
+  const sym = el.dataset.sym;
+  const tick = el.dataset.tick || '0.05';
+  const cat = el.dataset.cat;
+  const expiries = (el.dataset.expiries||'').split(',').filter(Boolean);
+
+  if(cat === 'OPT' && !id){
+    // show expiry chips for options underlying
+    showOptExpiries(sym, seg, expiries);
+    document.getElementById('symResults').classList.remove('open');
+    return;
+  }
+
+  const secEl = document.getElementById('secId');
+  const segEl = document.getElementById('exSeg');
+  const tickEl = document.getElementById('wsTick');
+  const symEl = document.getElementById('wsSymbol');
+  if(secEl) secEl.value = id;
+  if(segEl) segEl.value = seg;
+  if(tickEl) tickEl.value = tick;
+  if(symEl) symEl.value = sym;
+  const search = document.getElementById('symSearch');
+  if(search) search.value = sym + (el.querySelector('.exp') ? ' ' + el.querySelector('.exp').textContent : '');
+  document.getElementById('symResults').classList.remove('open');
+  connLog('Selected '+sym+' · '+seg+':'+id,'ok');
+}
+
+function showOptExpiries(root, seg, expiries){
+  const row = document.getElementById('optExpiryRow');
+  if(!row) return;
+  row.style.display = 'block';
+  row.innerHTML = `<div class="row" style="font-size:11px;color:var(--muted)">Options · ${root} · pick expiry</div>
+    <div class="chip-row">${expiries.map(e => `<span class="chip opt-exp" data-e="${e}" data-root="${root}">${e}</span>`).join('')}</div>
+    <div class="row"><input type="text" id="optStrikeSearch" placeholder="Type strike e.g. 24500 CE" class="conn-input"></div>
+    <div class="row" style="font-size:10px;color:var(--muted)">Enter Security ID of the option contract (from scrip master) or use PC proxy for chain.</div>`;
+  row.querySelectorAll('.opt-exp').forEach(ch => {
+    ch.onclick = () => {
+      row.querySelectorAll('.opt-exp').forEach(c => c.classList.remove('on'));
+      ch.classList.add('on');
+      document.getElementById('exSeg').value = 'NSE_FNO';
+      document.getElementById('wsSymbol').value = root + ' ' + ch.dataset.e;
+      connLog('Expiry '+ch.dataset.e+' — enter option Security ID in field above','ok');
+    };
+  });
+}
+
+function onDhanNativeReady(){
+  connLog('Mobile native Dhan ready','ok');
+  loadInstruments();
+}
+
+// boot
+document.addEventListener('DOMContentLoaded', () => {
+  loadInstruments();
+  const s = document.getElementById('symSearch');
+  if(s){
+    s.addEventListener('input', onSymSearch);
+    s.addEventListener('focus', onSymSearch);
+  }
+  document.addEventListener('click', (e) => {
+    if(!e.target.closest('.sym-search-wrap')){
+      document.getElementById('symResults')?.classList.remove('open');
+    }
+  });
+  const adv = document.getElementById('btnShowAdvanced');
+  if(adv){
+    adv.onclick = () => {
+      document.querySelectorAll('.opt-advanced').forEach(el => {
+        el.style.display = el.style.display === 'block' ? 'none' : 'block';
+      });
+      // also show right DOM on demand
+      const right = document.querySelector('.side.right');
+      if(right) right.style.display = right.style.display === 'block' ? 'none' : 'block';
+    };
+  }
+});
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.group').forEach(g => {
+    const t = (g.querySelector('.group-title, .group-head, summary, .g-title')?.textContent || g.textContent || '').toUpperCase();
+    if(/HEATMAP|BUBBLE|OVERLAY|PRESET|COLOR|VOLUME PROFILE|WALL/.test(t) && !/DATA SOURCE|SYMBOL|LIVE|SIM/.test(t.substring(0,40))){
+      g.classList.add('opt-advanced');
+    }
+  });
+});
 </script>
 </body>
 </html>
